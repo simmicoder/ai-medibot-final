@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>AI MediBot</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    canvas { display: block; margin-bottom: 20px; width: 300px !important; height: 300px !important; }
+    #alerts { color: red; }
+    #orderSection button {
+      background: red; color: white; padding: 8px 12px;
+      border: none; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>AI MediBot Health Assistant</h1>
+  <canvas id="vitalsPie" width="300" height="300"></canvas>
+
+  <form id="symptomForm">
+    <label>Describe your symptoms:</label><br>
+    <textarea id="symptoms" rows="3" cols="50" placeholder="e.g. fever and cough"></textarea><br>
+    <button type="submit">Submit</button>
+  </form>
+
+  <p id="medAdvice" style="font-weight:bold;"></p>
+  <ul id="alerts"></ul>
+  <div id="orderSection"></div>
+
+  <script>
+    const ctx = document.getElementById('vitalsPie').getContext('2d');
+    const pieChart = new Chart(ctx, {
+      type: 'pie',
+      data: {
+        labels: ['Temp', 'Heart Rate', 'Systolic', 'Diastolic', 'SpO₂'],
+        datasets: [{
+          data: [0,0,0,0,0],
+          backgroundColor: ['red','blue','orange','purple','green']
+        }]
+      }
+    });
+
+    let latestVitals = {};
+    let lastSentAction = null;
+
+    function fetchVitals() {
+      fetch('/vitals')
+        .then(r => r.json())
+        .then(v => {
+          latestVitals = v;
+          pieChart.data.datasets[0].data = [
+            v.temperature, v.heart_rate, v.systolic, v.diastolic, v.spo2
+          ];
+          pieChart.update();
+        });
+    }
+
+    setInterval(fetchVitals, 2000);
+    fetchVitals();
+
+    document.getElementById('symptomForm').addEventListener('submit', e => {
+      e.preventDefault();
+      const sym = document.getElementById('symptoms').value.trim();
+      if (!sym) return alert('Please describe symptoms.');
+
+      fetch('/submit', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({vitals: latestVitals, symptoms: sym})
+      })
+      .then(r => r.json())
+      .then(data => {
+        document.getElementById('medAdvice').textContent =
+          `Medicine: ${data.suggested_med}`;
+
+        document.getElementById('alerts').innerHTML =
+          data.alerts.map(a => `<li>${a}</li>`).join('');
+
+        const ord = document.getElementById('orderSection');
+        if (!data.in_stock) {
+          ord.innerHTML = `<a href="${data.order_url}" target="_blank">
+            <button>Order Now</button></a>`;
+        } else {
+          ord.innerHTML = '';
+        }
+
+        // Prevent repeat SMS for same condition
+        const currentAction = `${data.suggested_med} | ${sym}`;
+        if (data.alerts.includes("Doctor SMS sent") && lastSentAction !== currentAction) {
+          alert("⚠️ Doctor has been notified via SMS.");
+          lastSentAction = currentAction;
+        }
+      });
+    });
+  </script>
+</body>
+</html>
